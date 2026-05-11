@@ -1306,8 +1306,3 @@ async def agent_card(request: Request):
             "fhirOutput": "CarePlan resource with activities, goals, provenance, and feature attribution"
         }
     })
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8006)
