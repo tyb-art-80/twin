@@ -1096,6 +1096,218 @@ async def get_guidelines(diagnosis_code: str):
     }
 
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+@app.get("/.well-known/agent-card.json")
+async def agent_card(request: Request):
+    base_url = str(request.base_url).rstrip("/").replace("http://", "https://")
+    return JSONResponse({
+        "name": "MediTwin Digital Twin Agent",
+        "description": (
+            "XGBoost-based disease progression simulation agent for MediTwin AI (v2.2). "
+            "Accepts a PatientState and a list of treatment options, then simulates each "
+            "option using 5 trained XGBoost classifiers (30d mortality, 30d readmission, "
+            "complication, 90d readmission, 1yr mortality) with 95% CI uncertainty "
+            "quantification via bootstrap perturbation. Enriches each scenario with "
+            "pharmacokinetic dose adjustments, drug combination synergy detection, CURB-65 "
+            "and Charlson comorbidity index scoring, temporal treatment trajectories "
+            "(7d/30d/90d/1yr), guideline adherence checking, allergy/drug interaction "
+            "safety checks, sensitivity analysis, cost-effectiveness analysis, and a "
+            "Gemini LLM what-if narrative. Outputs a FHIR CarePlan and full provenance "
+            "block. All results persisted to PostgreSQL."
+        ),
+        "version": "2.2.0",
+        "url": base_url,
+        "provider": {
+            "organization": "MediTwin AI",
+            "name": "Tayyab Hussain",
+            "url": "https://github.com/hssn5667/digital-twin-agent"
+        },
+        "supportedInterfaces": [
+            {
+                "url": f"{base_url}/simulate",
+                "protocolBinding": "HTTP+JSON",
+                "protocolVersion": "2.2",
+                "description": (
+                    "Blocking simulation — runs the full 10-step pipeline and returns a "
+                    "complete DigitalTwinResponse with all scenarios, narrative, FHIR "
+                    "CarePlan, sensitivity analysis, and cost-effectiveness summary."
+                )
+            },
+            {
+                "url": f"{base_url}/stream",
+                "protocolBinding": "HTTP+SSE",
+                "protocolVersion": "2.2",
+                "description": (
+                    "SSE streaming simulation — emits status/progress/token/complete events "
+                    "in real time as each pipeline step completes, including per-token LLM "
+                    "narrative streaming."
+                )
+            },
+            {
+                "url": f"{base_url}/guidelines/{{diagnosis_code}}",
+                "protocolBinding": "HTTP+JSON",
+                "protocolVersion": "2.2",
+                "description": (
+                    "Returns evidence-based clinical guidelines for a given ICD-10 code — "
+                    "first-line drugs, second-line drugs, inpatient criteria, and monitoring "
+                    "recommendations."
+                )
+            }
+        ],
+        "capabilities": {
+            "streaming": True,
+            "pushNotifications": False,
+            "stateTransitionHistory": True,
+            "multiHorizonPrediction": True,
+            "uncertaintyQuantification": True,
+            "sensitivityAnalysis": True,
+            "costEffectivenessAnalysis": True,
+            "guidelineAdherenceChecking": True,
+            "pharmacokineticAdjustments": True,
+            "clinicalRiskScores": True,
+            "combinationSynergyDetection": True,
+            "temporalTreatmentEffects": True,
+            "fhirOutput": True,
+            "llmNarrative": True,
+            "llmFallback": True,
+            "databasePersistence": True
+        },
+        "defaultInputModes": ["application/json"],
+        "defaultOutputModes": ["application/json", "text/event-stream"],
+        "skills": [
+            {
+                "id": "simulate_treatment",
+                "name": "Simulate Treatment Options (Blocking)",
+                "description": (
+                    "Full 10-step simulation pipeline: (1) XGBoost feature engineering "
+                    "(age, labs, comorbidities, medications → feature vector); (2) baseline "
+                    "risk prediction with 95% CI for mortality_30d, readmission_30d, "
+                    "complication, readmission_90d, mortality_1yr; (3) optional sensitivity "
+                    "analysis (feature importance + one-at-a-time perturbation); (4) simulate "
+                    "each treatment option — applies drug/intervention effect modifiers to "
+                    "baseline risks; (5) per-option guideline adherence checking (FIRST_LINE / "
+                    "SECOND_LINE / OFF_GUIDELINE); (6) allergy + drug-drug interaction safety "
+                    "checks; (7) pharmacokinetic dose adjustments (renal/hepatic function); "
+                    "(8) combination synergy detection with mechanism explanation; (9) temporal "
+                    "treatment trajectories (7d/30d/90d/1yr recovery curves); (10) recommend "
+                    "best option via composite score (mortality + readmission + cost). "
+                    "Appended: CURB-65 / Charlson scores, Gemini LLM narrative, FHIR CarePlan, "
+                    "cost-effectiveness ICER analysis, and full provenance block."
+                ),
+                "tags": ["xgboost", "simulation", "treatment", "fhir", "gemini", "icd10",
+                         "pharmacokinetics", "curb65", "charlson", "temporal", "cds"],
+                "inputModes": ["application/json"],
+                "outputModes": ["application/json"]
+            },
+            {
+                "id": "stream_simulation",
+                "name": "Stream Treatment Simulation (SSE)",
+                "description": (
+                    "SSE streaming variant of simulate_treatment. Emits ordered events: "
+                    "status (step labels), progress (per-step percentage), token (per-token "
+                    "LLM narrative output), and a final complete event containing the full "
+                    "DigitalTwinResponse. Includes graceful fallback to non-streaming LLM "
+                    "invocation if astream_events fails."
+                ),
+                "tags": ["sse", "streaming", "simulation", "gemini", "real-time", "token-streaming"],
+                "inputModes": ["application/json"],
+                "outputModes": ["text/event-stream"]
+            },
+            {
+                "id": "get_guidelines",
+                "name": "Get Clinical Guidelines",
+                "description": (
+                    "Returns evidence-based treatment guidelines for a given ICD-10 diagnosis "
+                    "code: first-line drug recommendations, second-line alternatives, inpatient "
+                    "hospitalization criteria, and monitoring parameters. Used internally by "
+                    "guideline_adherence_checking during simulation."
+                ),
+                "tags": ["guidelines", "icd10", "cds", "evidence-based"],
+                "inputModes": [],
+                "outputModes": ["application/json"]
+            },
+            {
+                "id": "get_simulation_history",
+                "name": "Get Patient Simulation History",
+                "description": (
+                    "Returns paginated simulation records for a patient from PostgreSQL, "
+                    "newest first. Each record includes diagnosis, risk profile, baseline "
+                    "risks, recommended option, model confidence, treatment options count, "
+                    "scenarios, LLM narrative, FHIR CarePlan, and provenance. Supports "
+                    "limit/offset pagination and request-ID lookup."
+                ),
+                "tags": ["history", "audit", "patient", "postgresql", "pagination"],
+                "inputModes": ["application/json"],
+                "outputModes": ["application/json"]
+            },
+            {
+                "id": "get_simulation_stats",
+                "name": "Get Patient Simulation Stats",
+                "description": (
+                    "Returns aggregate statistics across all simulation sessions for a "
+                    "patient: total simulations, most common diagnoses, risk profile "
+                    "distribution, average baseline mortality and readmission risks, "
+                    "recommendation frequency by option ID, and first/latest session "
+                    "timestamps."
+                ),
+                "tags": ["stats", "analytics", "patient", "postgresql"],
+                "inputModes": ["application/json"],
+                "outputModes": ["application/json"]
+            }
+        ],
+        "twinConfig": {
+            "xgboostModels": {
+                "core": [
+                    {"name": "mortality_30d",   "file": "mortality_30d.json",   "horizon": "30 days"},
+                    {"name": "readmission_30d", "file": "readmission_30d.json", "horizon": "30 days"},
+                    {"name": "complication",    "file": "complication.json",    "horizon": "30 days"}
+                ],
+                "extended": [
+                    {"name": "readmission_90d", "file": "readmission_90d.json", "horizon": "90 days"},
+                    {"name": "mortality_1yr",   "file": "mortality_1yr.json",   "horizon": "1 year"}
+                ],
+                "uncertaintyMethod": "Bootstrap feature perturbation (n=200, 95% CI)",
+                "confidenceLevels": {
+                    "HIGH":     "CI width < 0.15",
+                    "MODERATE": "CI width 0.15–0.30",
+                    "LOW":      "CI width > 0.30"
+                }
+            },
+            "featureEngineering": {
+                "featureCount": len(FEATURE_NAMES),
+                "keyFeatures": ["age", "wbc", "creatinine", "albumin", "comorbidity_count",
+                                 "critical_lab_count", "medication_count", "imaging_available"],
+                "clinicalScores": ["CURB-65 (pneumonia severity)", "Charlson Comorbidity Index"]
+            },
+            "llmConfig": {
+                "provider": "Google Gemini",
+                "model": "models/gemini-2.5-flash-lite",
+                "temperature": 0.2,
+                "maxOutputTokens": 2048,
+                "role": "What-if narrative generation across treatment scenarios",
+                "fallbackMode": "Rule-based summary (no LLM narrative)"
+            },
+            "clinicalTools": [
+                "check_drug_guideline_adherence (ICD-10 → first/second-line mapping)",
+                "check_allergy_contraindications (allergy + DDI alerts)",
+                "perform_sensitivity_analysis (one-at-a-time feature perturbation)",
+                "analyze_cost_effectiveness (ICER calculation per scenario)",
+                "calculate_pk_adjustments (renal/hepatic dose adjustments)",
+                "detect_combination_synergy (pairwise drug synergy with mechanism)"
+            ],
+            "enhancementsApplied": [
+                "P0: 90d/1yr model loading + pharmacokinetic dose adjustments",
+                "P1: CURB-65/Charlson scores + combination synergy explanation",
+                "P2: PostgreSQL persistence for all simulation records",
+                "P3: Temporal treatment trajectories (7d/30d/90d/1yr recovery curves)"
+            ],
+            "fhirOutput": "CarePlan resource with activities, goals, provenance, and feature attribution"
+        }
+    })
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8006)
+    uvicorn.run(app, host="0.0.0.0", port=8006)
