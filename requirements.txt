@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+pydantic 
+pydantic-settings 
+asyncpg 
+numpy 
+pandas 
+scikit-learn 
+xgboost 
+langchain 
+langchain-google-genai 
+langchain-core 
+langsmith 
+python-dotenv
